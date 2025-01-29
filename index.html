@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>PDF Masking</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      margin: 20px;
+    }
+
+    form {
+      margin-bottom: 20px;
+    }
+
+    iframe {
+      width: 100%;
+      height: 500px;
+      border: 1px solid #ccc;
+    }
+  </style>
+</head>
+
+<body>
+  <h1>PDF Masking</h1>
+  <form id="pdfForm">
+    <label for="pdf_url">PDF URL:</label><br>
+    <input type="url" id="pdf_url" name="pdf_url" placeholder="Enter PDF URL" required style="width: 100%;"><br>
+    <span style="color: red;">* only upload pdf url</span>
+    <br>
+    <br>
+    <label for="text_to_detect">Text to Detect:</label><br>
+    <input type="text" id="text_to_detect" name="text_to_detect" placeholder="Enter text to detect" required
+      style="width: 100%;"><br><br>
+
+    <button type="submit">Submit</button>
+  </form>
+
+  <h2>Masked PDF Preview</h2>
+  <iframe id="pdfPreview" src="" style="display: none;"></iframe>
+
+  <script>
+    document.getElementById('pdfForm').addEventListener('submit', async (e) => {
+      e.preventDefault();
+
+      const pdfUrl = document.getElementById('pdf_url').value;
+      const textToDetect = document.getElementById('text_to_detect').value;
+
+      const requestData = {
+        pdf_url: pdfUrl,
+        text_to_detect: textToDetect
+      };
+
+      try {
+        const response = await fetch('https://wp59s0wcwd.execute-api.ap-south-1.amazonaws.com/default/VDB-Masking-Dev', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify(requestData)
+        });
+
+        if (response.ok && response.body) {
+          const result = await response.json();
+          const pdfBase64 = result.pdf_base64;
+          // Show the PDF in iframe
+          const pdfPreview = document.getElementById('pdfPreview');
+          pdfPreview.src = `data:application/pdf;base64,${pdfBase64}`;
+          pdfPreview.style.display = 'block';
+        } else {
+          alert('Failed to process PDF. Please try again.');
+        }
+      } catch (error) {
+        console.log('Error:', error);
+        alert('An error occurred while processing the PDF.');
+      }
+    });
+  </script>
+</body>
+
+</html>
