@@ -12,7 +12,7 @@
     form {
       margin-bottom: 20px;
     }
-    .pdf-container {
+    iframe { 
       width: 100%;
       height: 500px;
       border: 1px solid #ccc;
@@ -22,20 +22,11 @@
       margin: 20px 0;
       color: #666;
     }
-    .error {
-      color: red;
-      margin: 10px 0;
-      display: none;
-    }
-    .download-link {
-      display: none;
-      margin: 10px 0;
-    }
   </style>
 </head>
 <body>
   <h1>PDF Masking</h1>
-  <form id="pdfForm" metood="POST">
+  <form id="pdfForm">
     <label for="pdf_url">PDF URL:</label><br>
     <input type="url" id="pdf_url" name="pdf_url" placeholder="Enter PDF URL" required style="width: 100%;"><br>
     <span style="color: red;">* only upload pdf url</span>
@@ -48,13 +39,9 @@
   </form>
   
   <div id="loading" class="loading">Processing PDF, please wait...</div>
-  <div id="error" class="error"></div>
-  <a id="downloadLink" class="download-link" href="#" download>Download PDF</a>
   
   <h2>Masked PDF Preview</h2>
-  <object id="pdfPreview" class="pdf-container" data="" type="application/pdf">
-    <p>Unable to display PDF. <a id="directLink" href="#">Click here to view directly</a></p>
-  </object>
+  <iframe id="pdfPreview" src="" style="display: none;"></iframe>
   
   <script>
     document.getElementById('pdfForm').addEventListener('submit', async (e) => {
@@ -64,16 +51,10 @@
       const textToDetect = document.getElementById('text_to_detect').value;
       const loadingDiv = document.getElementById('loading');
       const pdfPreview = document.getElementById('pdfPreview');
-      const errorDiv = document.getElementById('error');
-      const downloadLink = document.getElementById('downloadLink');
-      const directLink = document.getElementById('directLink');
       
-      // Reset UI
+      // Show loading message
       loadingDiv.style.display = 'block';
       pdfPreview.style.display = 'none';
-      errorDiv.style.display = 'none';
-      errorDiv.textContent = '';
-      downloadLink.style.display = 'none';
       
       const requestData = {
         pdf_url: pdfUrl,
@@ -90,37 +71,22 @@
         });
 
         const result = await response.json();
-        console.log('======= result", result);
+        
         if (response.ok && result.body) {
           const decodedBody = JSON.parse(result.body);
-          console.log("=======> decoded Body", decodedBody);
           const s3Url = decodedBody.s3_url;
-          console.log("======= s3Url", s3Url);
 
-          // Set the PDF URL
-          pdfPreview.data = s3Url;
+          // Load the PDF directly from S3 URL
+          pdfPreview.src = s3Url;
           pdfPreview.style.display = 'block';
-          
-          // Set up download link
-          downloadLink.href = s3Url;
-          downloadLink.style.display = 'inline-block';
-          
-          // Set up direct link
-          directLink.href = s3Url;
-          
-          // Add error handling
-          pdfPreview.onerror = () => {
-            errorDiv.textContent = 'Failed to load PDF preview. Please use the download link instead.';
-            errorDiv.style.display = 'block';
-          };
         } else {
-          throw new Error(result.message || 'Failed to process PDF');
+          alert('Failed to process PDF. Please try again.');
         }
       } catch (error) {
         console.error('Error:', error);
-        errorDiv.textContent = error.message || 'An error occurred while processing the PDF.';
-        errorDiv.style.display = 'block';
+        alert('An error occurred while processing the PDF.');
       } finally {
+        // Hide loading message
         loadingDiv.style.display = 'none';
       }
     });
