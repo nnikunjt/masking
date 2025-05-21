@@ -1,0 +1,90 @@
+# Use Amazon Linux 2 as base (better for building)
+FROM amazonlinux:2 AS builder
+
+# Install development tools and dependencies
+RUN yum update -y && \
+    yum groupinstall -y "Development Tools" && \
+    yum install -y \
+        gcc gcc-c++ make \
+        zlib-devel libjpeg-devel libpng-devel libtiff-devel \
+        libwebp-devel giflib-devel \
+        autoconf automake libtool pkg-config \
+        curl tar gzip which python3-devel && \
+    yum clean all
+
+# Install Leptonica from source
+RUN curl -L https://github.com/DanBloomberg/leptonica/releases/download/1.82.0/leptonica-1.82.0.tar.gz -o leptonica-1.82.0.tar.gz && \
+    tar -xzf leptonica-1.82.0.tar.gz && \
+    cd leptonica-1.82.0 && \
+    ./configure --prefix=/usr/local && \
+    make && \
+    make install && \
+    cd .. && \
+    rm -rf leptonica-1.82.0 leptonica-1.82.0.tar.gz
+
+# Create a configuration file for dynamic libraries
+RUN echo "/usr/local/lib" > /etc/ld.so.conf.d/local.conf && ldconfig
+
+# Install Tesseract from source
+RUN curl -L https://github.com/tesseract-ocr/tesseract/archive/refs/tags/5.3.0.tar.gz -o 5.3.0.tar.gz && \
+    tar -xzf 5.3.0.tar.gz && \
+    cd tesseract-5.3.0 && \
+    ./autogen.sh && \
+    PKG_CONFIG_PATH=/usr/local/lib/pkgconfig \
+    ./configure --prefix=/usr/local && \
+    make && \
+    make install && \
+    cd .. && \
+    rm -rf tesseract-5.3.0 5.3.0.tar.gz
+
+# Download and install Tesseract trained data
+RUN mkdir -p /usr/local/share/tessdata && \
+    curl -L https://github.com/tesseract-ocr/tessdata_best/raw/main/eng.traineddata -o /usr/local/share/tessdata/eng.traineddata
+
+# Install ZBar
+RUN curl -L https://github.com/mchehab/zbar/archive/refs/tags/0.23.1.tar.gz -o zbar.tar.gz && \
+    tar -xzf zbar.tar.gz && \
+    cd zbar-0.23.1 && \
+    autoreconf -fi && \
+    ./configure --prefix=/usr/local --without-gtk --without-qt --without-imagemagick --with-python=python3 --disable-video && \
+    make && \
+    make install && \
+    cd .. && rm -rf zbar.tar.gz zbar-0.23.1
+
+# Now use the Lambda runtime image
+FROM public.ecr.aws/lambda/python:3.11
+
+# Copy built libraries from builder stage
+COPY --from=builder /usr/local /usr/local
+COPY --from=builder /etc/ld.so.conf.d/local.conf /etc/ld.so.conf.d/
+
+# Ensure dynamic libraries are properly referenced
+RUN echo "/usr/local/lib" > /etc/ld.so.conf.d/local.conf && \
+    yum install -y glibc-common && \
+    if [ -x "$(command -v ldconfig)" ]; then ldconfig; else echo "ldconfig not available, skipping"; fi && \
+    # Create explicit links for ZBar library
+    mkdir -p /var/task/lib && \
+    cp /usr/local/lib/libzbar.so.0 /var/task/lib/ && \
+    # Also copy to standard library locations
+    cp /usr/local/lib/libzbar.so.0 /usr/lib64/ && \
+    cp /usr/local/lib/libzbar.so.0 /usr/lib/ || true
+
+# Set environment variables for Tesseract and ZBar
+ENV TESSDATA_PREFIX=/usr/local/share/tessdata
+ENV PATH="/usr/local/bin:${PATH}"
+ENV LD_LIBRARY_PATH="/usr/local/lib:/var/task/lib:${LD_LIBRARY_PATH}"
+
+# Set working directory
+WORKDIR /var/task
+
+# Copy function code and dependencies
+COPY requirements.txt .
+
+# Install Python dependencies
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Copy function code
+COPY lambda_function.py .
+
+# Set the CMD for AWS Lambda
+CMD ["lambda_function.lambda_handler"]

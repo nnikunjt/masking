@@ -1,0 +1,33 @@
+# Use the Amazon Linux 2 base image for Lambda Python 3.11
+FROM public.ecr.aws/lambda/python:3.11
+
+# Install required build tools and dependencies
+RUN yum update -y && \
+    yum install -y gcc gcc-c++ glibc glibc-devel make libffi-devel zlib-devel tar gtk2-devel ImageMagick-devel gzip wget openssl openssl-devel gettext gettext-devel autoconf automake libtool
+
+# Download and build zbar from source
+RUN wget https://github.com/mchehab/zbar/archive/refs/tags/0.23.1.tar.gz -O zbar.tar.gz && \
+    tar -xzf zbar.tar.gz && \
+    cd zbar-0.23.1 && \
+    autoreconf -fi && \
+    ./configure --without-gtk --without-qt --without-imagemagick --with-python=yes --disable-video && \
+    make && \
+    make install && \
+    cd .. && rm -rf zbar.tar.gz zbar-0.23.1
+
+ENV LD_LIBRARY_PATH="/usr/local/lib:${LD_LIBRARY_PATH}"
+
+RUN cp /usr/local/lib/libzbar.so /usr/lib64/
+
+# Set the working directory
+WORKDIR /var/task
+
+# Copy your Lambda function code and requirements
+COPY lambda_function.py .
+COPY requirements.txt .
+
+# Install Python dependencies in the Lambda task directory
+RUN pip install --no-cache-dir -r requirements.txt -t .
+
+# Command to run the Lambda function
+CMD ["lambda_function.lambda_handler"]
