@@ -90,10 +90,12 @@
         });
 
         const result = await response.json();
-        
+        console.log('======= result", result);
         if (response.ok && result.body) {
           const decodedBody = JSON.parse(result.body);
+          console.log("=======> decoded Body", decodedBody);
           const s3Url = decodedBody.s3_url;
+          console.log("======= s3Url", s3Url);
 
           // Set the PDF URL
           pdfPreview.data = s3Url;
