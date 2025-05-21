@@ -1,6 +1,5 @@
 <!DOCTYPE html>
 <html lang="en">
-
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -10,19 +9,21 @@
       font-family: Arial, sans-serif;
       margin: 20px;
     }
-
     form {
       margin-bottom: 20px;
     }
-
-    iframe {
+    iframe { 
       width: 100%;
       height: 500px;
       border: 1px solid #ccc;
     }
+    .loading {
+      display: none;
+      margin: 20px 0;
+      color: #666;
+    }
   </style>
 </head>
-
 <body>
   <h1>PDF Masking</h1>
   <form id="pdfForm">
@@ -32,22 +33,29 @@
     <br>
     <br>
     <label for="text_to_detect">Text to Detect:</label><br>
-    <input type="text" id="text_to_detect" name="text_to_detect" placeholder="Enter text to detect" required
-      style="width: 100%;"><br><br>
-
+    <input type="text" id="text_to_detect" name="text_to_detect" placeholder="Enter text to detect" required style="width: 100%;"><br><br>
+    
     <button type="submit">Submit</button>
   </form>
-
+  
+  <div id="loading" class="loading">Processing PDF, please wait...</div>
+  
   <h2>Masked PDF Preview</h2>
   <iframe id="pdfPreview" src="" style="display: none;"></iframe>
-
+  
   <script>
     document.getElementById('pdfForm').addEventListener('submit', async (e) => {
       e.preventDefault();
-
+      
       const pdfUrl = document.getElementById('pdf_url').value;
       const textToDetect = document.getElementById('text_to_detect').value;
-
+      const loadingDiv = document.getElementById('loading');
+      const pdfPreview = document.getElementById('pdfPreview');
+      
+      // Show loading message
+      loadingDiv.style.display = 'block';
+      pdfPreview.style.display = 'none';
+      
       const requestData = {
         pdf_url: pdfUrl,
         text_to_detect: textToDetect
@@ -62,22 +70,26 @@
           body: JSON.stringify(requestData)
         });
 
-        if (response.ok && response.body) {
-          const result = await response.json();
-          const pdfBase64 = result.pdf_base64;
-          // Show the PDF in iframe
-          const pdfPreview = document.getElementById('pdfPreview');
-          pdfPreview.src = `data:application/pdf;base64,${pdfBase64}`;
+        const result = await response.json();
+        
+        if (response.ok && result.body) {
+          const decodedBody = JSON.parse(result.body);
+          const s3Url = decodedBody.s3_url;
+
+          // Load the PDF directly from S3 URL
+          pdfPreview.src = s3Url;
           pdfPreview.style.display = 'block';
         } else {
           alert('Failed to process PDF. Please try again.');
         }
       } catch (error) {
-        console.log('Error:', error);
+        console.error('Error:', error);
         alert('An error occurred while processing the PDF.');
+      } finally {
+        // Hide loading message
+        loadingDiv.style.display = 'none';
       }
     });
   </script>
 </body>
-
 </html>
