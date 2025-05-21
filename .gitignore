@@ -27,5 +27,12 @@ ENV/
 .DS_Store
 Thumbs.db 
 
-
+# Output files and PDFs
+output/
 output/*
+*.pdf
+*.PDF
+**/output/
+**/output/*
+**/*.pdf
+**/*.PDF
