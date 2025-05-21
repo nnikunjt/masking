@@ -12,7 +12,7 @@
     form {
       margin-bottom: 20px;
     }
-    iframe { 
+    .pdf-container {
       width: 100%;
       height: 500px;
       border: 1px solid #ccc;
@@ -21,6 +21,15 @@
       display: none;
       margin: 20px 0;
       color: #666;
+    }
+    .error {
+      color: red;
+      margin: 10px 0;
+      display: none;
+    }
+    .download-link {
+      display: none;
+      margin: 10px 0;
     }
   </style>
 </head>
@@ -39,9 +48,13 @@
   </form>
   
   <div id="loading" class="loading">Processing PDF, please wait...</div>
+  <div id="error" class="error"></div>
+  <a id="downloadLink" class="download-link" href="#" download>Download PDF</a>
   
   <h2>Masked PDF Preview</h2>
-  <iframe id="pdfPreview" src="" style="display: none;"></iframe>
+  <object id="pdfPreview" class="pdf-container" data="" type="application/pdf">
+    <p>Unable to display PDF. <a id="directLink" href="#">Click here to view directly</a></p>
+  </object>
   
   <script>
     document.getElementById('pdfForm').addEventListener('submit', async (e) => {
@@ -51,10 +64,16 @@
       const textToDetect = document.getElementById('text_to_detect').value;
       const loadingDiv = document.getElementById('loading');
       const pdfPreview = document.getElementById('pdfPreview');
+      const errorDiv = document.getElementById('error');
+      const downloadLink = document.getElementById('downloadLink');
+      const directLink = document.getElementById('directLink');
       
-      // Show loading message
+      // Reset UI
       loadingDiv.style.display = 'block';
       pdfPreview.style.display = 'none';
+      errorDiv.style.display = 'none';
+      errorDiv.textContent = '';
+      downloadLink.style.display = 'none';
       
       const requestData = {
         pdf_url: pdfUrl,
@@ -76,17 +95,30 @@
           const decodedBody = JSON.parse(result.body);
           const s3Url = decodedBody.s3_url;
 
-          // Load the PDF directly from S3 URL
-          pdfPreview.src = s3Url;
+          // Set the PDF URL
+          pdfPreview.data = s3Url;
           pdfPreview.style.display = 'block';
+          
+          // Set up download link
+          downloadLink.href = s3Url;
+          downloadLink.style.display = 'inline-block';
+          
+          // Set up direct link
+          directLink.href = s3Url;
+          
+          // Add error handling
+          pdfPreview.onerror = () => {
+            errorDiv.textContent = 'Failed to load PDF preview. Please use the download link instead.';
+            errorDiv.style.display = 'block';
+          };
         } else {
-          alert('Failed to process PDF. Please try again.');
+          throw new Error(result.message || 'Failed to process PDF');
         }
       } catch (error) {
         console.error('Error:', error);
-        alert('An error occurred while processing the PDF.');
+        errorDiv.textContent = error.message || 'An error occurred while processing the PDF.';
+        errorDiv.style.display = 'block';
       } finally {
-        // Hide loading message
         loadingDiv.style.display = 'none';
       }
     });
