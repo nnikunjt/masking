@@ -19,7 +19,10 @@ RUN yum update -y && \
     cairo-devel pango-devel \
     gettext gettext-devel ImageMagick-devel \
     glibc-common \
-    ghostscript   gtk2-devel wget  openssl openssl-devel && \
+    ghostscript gtk2-devel wget openssl openssl-devel \
+    freetype-devel fontconfig-devel \
+    libX11-devel libXext-devel libXrender-devel \
+    mesa-libGL-devel mesa-libGLU-devel && \
     yum clean all && \
     rm -rf /var/cache/yum
 
@@ -49,7 +52,10 @@ RUN cp /usr/local/lib/libzbar.so /usr/lib64/
 ENV TESSDATA_PREFIX=/usr/local/share/tessdata
 ENV PATH="/usr/local/bin:${PATH}"
 ENV LD_LIBRARY_PATH="/usr/local/lib:${LD_LIBRARY_PATH}"
-ENV PKG_CONFIG_PATH="/usr/local/lib/pkgconfig:${PKG_CONFIG_PATH}"
+ENV PKG_CONFIG_PATH="/usr/local/lib/pkgconfig"
+ENV PYTHONPATH="/var/task:${PYTHONPATH}"
+ENV CFLAGS="-I/usr/local/include"
+ENV LDFLAGS="-L/usr/local/lib"
 
 # Create directories needed for installation
 RUN mkdir -p /usr/local/share/tessdata
@@ -88,10 +94,19 @@ WORKDIR /var/task
 
 # Copy requirements first to leverage Docker cache
 COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+
+# Install packages in order to avoid conflicts, PyMuPDF last
+RUN pip install --upgrade pip setuptools wheel && \
+    pip install --no-cache-dir boto3>=1.34.0 && \
+    pip install --no-cache-dir requests>=2.31.0 && \
+    pip install --no-cache-dir Pillow>=10.0.0 && \
+    pip install --no-cache-dir pyzbar>=0.1.9 && \
+    pip install --no-cache-dir pdfplumber>=0.10.0 && \
+    pip install --no-cache-dir opencv-python>=4.8.0 && \
+    pip install --no-cache-dir --no-build-isolation PyMuPDF==1.23.8
 
 # Copy only the function code (reduces rebuild time when only code changes)
-COPY lambda_function.py .
+COPY lambda_function_pymupdf.py .
 
 # Set the CMD for AWS Lambda
-CMD ["lambda_function.lambda_handler"]
+CMD ["lambda_function_pymupdf.lambda_handler"]

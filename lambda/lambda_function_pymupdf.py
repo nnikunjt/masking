@@ -1,8 +1,6 @@
 import json
-import base64
 import requests
-import pdfplumber
-from pytesseract import pytesseract, Output
+import fitz  # PyMuPDF for efficient text detection
 from PIL import ImageFilter, ImageDraw, Image
 from io import BytesIO
 from pyzbar.pyzbar import decode
@@ -14,7 +12,6 @@ import os
 import time
 from datetime import datetime
 import math
-import fitz  # PyMuPDF for better vertical text detection
 
 # Initialize S3 client outside the handler for better performance
 s3_client = boto3.client('s3')
@@ -22,9 +19,9 @@ s3_client = boto3.client('s3')
 # Get bucket name from environment variable
 BUCKET_NAME = os.environ.get('AWS_S3_BUCKET', 'masked-certificates-bucket')
 
-# Vertical text detection parameters
-ANGLE_TOLERANCE_DEG = 12        # how close to 90° we consider "vertical"
-PADDING = 1.5                   # extra points to grow the redaction box
+# Text detection parameters
+ANGLE_TOLERANCE_DEG = 12        
+PADDING = 1.5                   
 
 def log_timing(operation, start_time):
     """Log timing for operations"""
@@ -50,6 +47,10 @@ def mask_qr_code_and_barcode(img, positions):
     
     return positions
 
+def clean_text(text):
+    """Clean extracted text by removing unwanted characters."""
+    return re.sub(r'\(cid:\d+\)', '', text)
+
 def is_vertical(dir_vec):
     """Check if text direction vector indicates vertical text."""
     # dir = (dx, dy) unit vector for the line's advance direction
@@ -59,8 +60,9 @@ def is_vertical(dir_vec):
     if ang > 180: ang -= 360
     return abs(abs(ang) - 90) <= ANGLE_TOLERANCE_DEG
 
-def detect_vertical_text_with_pymupdf(pdf_bytes, target_text):
-    """Detect vertical text using PyMuPDF's text direction analysis."""
+def detect_text_with_pymupdf(pdf_bytes, target_text):
+    """Detect both horizontal and vertical text using PyMuPDF's text analysis."""
+    horizontal_positions = {}
     vertical_positions = {}
     
     # Create a temporary BytesIO object for PyMuPDF
@@ -68,6 +70,7 @@ def detect_vertical_text_with_pymupdf(pdf_bytes, target_text):
     doc = fitz.open(stream=pdf_stream, filetype="pdf")
     
     for page_number, page in enumerate(doc, start=1):
+        page_horizontal_positions = []
         page_vertical_positions = []
         
         # Get text as a structured dict so we can examine line directions & boxes
@@ -79,16 +82,15 @@ def detect_vertical_text_with_pymupdf(pdf_bytes, target_text):
                 
             for line in block.get("lines", []):
                 dir_vec = line.get("dir", (1, 0))  # default horizontal
-                if not is_vertical(dir_vec):
-                    continue
-
-                # Check if this vertical line contains our target text
+                is_vertical_text = is_vertical(dir_vec)
+                
+                # Check if this line contains our target text
                 line_text = ""
                 for span in line.get("spans", []):
                     line_text += span.get("text", "")
                 
                 if target_text.lower() in line_text.lower():
-                    # Union all span boxes in this vertical line
+                    # Union all span boxes in this line
                     rect = None
                     for span in line.get("spans", []):
                         r = fitz.Rect(span["bbox"])
@@ -103,165 +105,138 @@ def detect_vertical_text_with_pymupdf(pdf_bytes, target_text):
                             rect.y1 + PADDING
                         )
                         
-                        page_vertical_positions.append({
+                        position_data = {
                             "x0": padded_rect.x0,
                             "y0": padded_rect.y0,
                             "x1": padded_rect.x1,
                             "y1": padded_rect.y1,
-                            "is_vertical": True,
-                            "is_pymupdf": True
-                        })
+                            "text": line_text.strip(),
+                            "is_vertical": is_vertical_text
+                        }
+                        
+                        if is_vertical_text:
+                            page_vertical_positions.append(position_data)
+                        else:
+                            page_horizontal_positions.append(position_data)
         
+        if page_horizontal_positions:
+            horizontal_positions[page_number] = page_horizontal_positions
         if page_vertical_positions:
             vertical_positions[page_number] = page_vertical_positions
     
     doc.close()
-    return vertical_positions
+    return horizontal_positions, vertical_positions
 
-def clean_text(text):
-    """Clean extracted text by removing unwanted characters."""
-    return re.sub(r'\(cid:\d+\)', '', text)
-
-
-
-
-
-def text_based_detection(pdf_bytes, target_text):
-    """Extracts text and determines if the target text exists."""
-    text_positions = {}
-
-    with pdfplumber.open(pdf_bytes) as pdf:
-        for page_number, page in enumerate(pdf.pages, start=1):
-            text = page.extract_text()
-            if text:
-                cleaned_text = clean_text(text)
-                if target_text in cleaned_text:
-                    print(f"Text-based detection successful on page {page_number}")
-                    for word in page.extract_words():
-                        cleaned_word = clean_text(word["text"])
-                        if target_text.lower() in cleaned_word.lower():
-                            if page_number not in text_positions:
-                                text_positions[page_number] = []
-                            text_positions[page_number].append({
-                                "x0": word["x0"],
-                                "y0": word["top"],
-                                "x1": word["x1"],
-                                "y1": word["bottom"]
-                            })
-    return text_positions if text_positions else None
-
-def ocr_based_detection(image, target_text):
-    """Perform OCR and return bounding boxes if text is found."""
-    ocr_data = pytesseract.image_to_data(image, output_type=Output.DICT)
-    positions = []
-
-    for i, text in enumerate(ocr_data["text"]):
-        cleaned_word = clean_text(text)
-        if target_text in cleaned_word.strip():
-            x, y, w, h = ocr_data["left"][i], ocr_data["top"][i], ocr_data["width"][i], ocr_data["height"][i]
-            positions.append((x, y, x + w, y + h))
-
-    return positions
-
-def mask_text_in_pdf(pdf_bytes, target_text, dpi=300):
-    """Enhanced masking that handles both horizontal and vertical text using PyMuPDF for accurate vertical detection."""
+def mask_text_in_pdf_pymupdf(pdf_bytes, target_text):
+    """Fast and accurate masking using PyMuPDF for text detection with blur effects, plus QR code detection."""
     output_buffer = BytesIO()
-
-    text_positions = text_based_detection(pdf_bytes, target_text)
-
-    # If text-based detection fails, use OCR-based detection
-    ocr_required = text_positions is None
-
-    # Detect vertical text using PyMuPDF (more accurate than OCR)
-    print("Detecting vertical text using PyMuPDF...")
-    pymupdf_vertical_positions = detect_vertical_text_with_pymupdf(pdf_bytes, target_text)
-    print(f"PyMuPDF vertical positions: {pymupdf_vertical_positions}")
-
-    with pdfplumber.open(pdf_bytes) as pdf:
-        processed_pages = []
-
-        for page_number, page in enumerate(pdf.pages, start=1):
-            page_image = page.to_image(resolution=dpi)
-            img = page_image.original.convert("RGB")
-            draw = ImageDraw.Draw(img)
+    
+    print(f"Detecting text using PyMuPDF: '{target_text}'")
+    detection_start = time.time()
+    
+    # Detect both horizontal and vertical text using PyMuPDF
+    horizontal_positions, vertical_positions = detect_text_with_pymupdf(pdf_bytes, target_text)
+    
+    log_timing("PyMuPDF text detection", detection_start)
+    
+    print(f"Found horizontal text on {len(horizontal_positions)} pages")
+    print(f"Found vertical text on {len(vertical_positions)} pages")
+    
+    # Create a temporary BytesIO object for PyMuPDF processing
+    pdf_stream = BytesIO(pdf_bytes.getvalue())
+    doc = fitz.open(stream=pdf_stream, filetype="pdf")
+    
+    # Process each page
+    for page_number, page in enumerate(doc, start=1):
+        print(f"Processing page {page_number}...")
+        
+        # Convert page to high-resolution image for blur processing
+        mat = page.get_pixmap(matrix=fitz.Matrix(2, 2))  # 2x zoom for better quality
+        img_data = mat.tobytes("png")
+        img = Image.open(BytesIO(img_data))
+        draw = ImageDraw.Draw(img)
+        
+        img_width, img_height = img.size
+        pdf_width, pdf_height = page.rect.width, page.rect.height
+        x_scale = img_width / pdf_width
+        y_scale = img_height / pdf_height
+        
+        # Collect all positions for this page
+        page_positions = []
+        
+        # Add horizontal positions
+        if page_number in horizontal_positions:
+            for pos in horizontal_positions[page_number]:
+                page_positions.append({
+                    "x0": pos["x0"],
+                    "y0": pos["y0"],
+                    "x1": pos["x1"],
+                    "y1": pos["y1"],
+                    "is_vertical": False,
+                    "text": pos["text"]
+                })
+        
+        # Add vertical positions
+        if page_number in vertical_positions:
+            for pos in vertical_positions[page_number]:
+                page_positions.append({
+                    "x0": pos["x0"],
+                    "y0": pos["y0"],
+                    "x1": pos["x1"],
+                    "y1": pos["y1"],
+                    "is_vertical": True,
+                    "text": pos["text"]
+                })
+        
+        # Apply blur effects for all detected text
+        for pos in page_positions:
+            # Scale PDF coordinates to image coordinates
+            img_x0 = int(pos["x0"] * x_scale)
+            img_y0 = int(pos["y0"] * y_scale)
+            img_x1 = int(pos["x1"] * x_scale)
+            img_y1 = int(pos["y1"] * y_scale)
             
-            img_width, img_height = img.size
-            pdf_width, pdf_height = page.width, page.height
-            x_scale = img_width / pdf_width
-            y_scale = img_height / pdf_height
-
-            # Always detect vertical text regardless of OCR requirement
-            scaled_positions = []
-            
-            # Handle horizontal text detection
-            if ocr_required:
-                # Use OCR for horizontal text only
-                normal_positions = ocr_based_detection(img, target_text)
-                
-                # Convert normal positions to dict format
-                scaled_normal_positions = [{"x0": x, "y0": y, "x1": x1, "y1": y1, "is_vertical": False} 
-                                         for x, y, x1, y1 in normal_positions]
-                scaled_positions.extend(scaled_normal_positions)
+            if pos["is_vertical"]:
+                print(f"  Blurring vertical text: {pos['text']} at ({img_x0}, {img_y0}, {img_x1}, {img_y1})")
+                # Use stronger blur for vertical text
+                crop_region = img.crop((img_x0, img_y0, img_x1, img_y1))
+                blurred = crop_region.filter(ImageFilter.GaussianBlur(radius=20))
+                img.paste(blurred, (img_x0, img_y0))
             else:
-                # Use text-based detection for horizontal text
-                horizontal_positions = text_positions.get(page_number, [])
-                scaled_horizontal_positions = [
-                    {
-                        "x0": int(box["x0"] * x_scale),
-                        "y0": int(box["y0"] * y_scale),
-                        "x1": int(box["x1"] * x_scale),
-                        "y1": int(box["y1"] * y_scale),
-                        "is_vertical": False
-                    }
-                    for box in horizontal_positions
-                ]
-                scaled_positions.extend(scaled_horizontal_positions)
-            
-            # Add PyMuPDF-detected vertical text positions (already in PDF coordinates)
-            if page_number in pymupdf_vertical_positions:
-                pymupdf_positions = pymupdf_vertical_positions[page_number]
-                for pos in pymupdf_positions:
-                    # Scale PyMuPDF positions to image coordinates
-                    scaled_pos = {
-                        "x0": int(pos["x0"] * x_scale),
-                        "y0": int(pos["y0"] * y_scale),
-                        "x1": int(pos["x1"] * x_scale),
-                        "y1": int(pos["y1"] * y_scale),
-                        "is_vertical": True,
-                        "is_pymupdf": True
-                    }
-                    scaled_positions.append(scaled_pos)
-
-            # Apply masking for detected text
-            for box in scaled_positions:
-                if box.get("is_vertical", False):
-                    if box.get("is_pymupdf", False):
-                        # For PyMuPDF-detected vertical text, use white fill (most accurate)
-                        print(f"Masking PyMuPDF vertical text: {box}")
-                        draw.rectangle([box["x0"], box["y0"], box["x1"], box["y1"]], fill="white")
-                    else:
-                        # For other vertical text, use blur
-                        print(f"Masking vertical text: {box}")
-                        crop_region = img.crop((box["x0"], box["y0"], box["x1"], box["y1"]))
-                        blurred = crop_region.filter(ImageFilter.GaussianBlur(radius=20))
-                        img.paste(blurred, (box["x0"], box["y0"]))
-                else:
-                    # Normal horizontal text masking
-                    crop_region = img.crop((box["x0"], box["y0"], box["x1"], box["y1"]))
-                    blurred = crop_region.filter(ImageFilter.GaussianBlur(radius=15))
-                    img.paste(blurred, (box["x0"], box["y0"]))
-
-            # Mask QR codes and barcodes
-            qr_barcode_positions = []
-            mask_qr_code_and_barcode(img, qr_barcode_positions)
-            for box in qr_barcode_positions:
-                draw.rectangle([box["x0"], box["y0"], box["x1"], box["y1"]], fill="white")
-
-            processed_pages.append(img)
-
-    if processed_pages:
-        processed_pages[0].save(output_buffer, format='PDF', save_all=True, append_images=processed_pages[1:])
-
+                print(f"  Blurring horizontal text: {pos['text']} at ({img_x0}, {img_y0}, {img_x1}, {img_y1})")
+                # Use standard blur for horizontal text
+                crop_region = img.crop((img_x0, img_y0, img_x1, img_y1))
+                blurred = crop_region.filter(ImageFilter.GaussianBlur(radius=15))
+                img.paste(blurred, (img_x0, img_y0))
+        
+        # Detect and mask QR codes and barcodes
+        print(f"  Detecting QR codes and barcodes on page {page_number}...")
+        qr_start_time = time.time()
+        
+        # Detect QR codes and barcodes
+        qr_barcode_positions = []
+        mask_qr_code_and_barcode(img, qr_barcode_positions)
+        
+        # Apply white fill for QR codes and barcodes (keep them completely masked)
+        for qr_pos in qr_barcode_positions:
+            print(f"    Masking QR/barcode at ({qr_pos['x0']}, {qr_pos['y0']}, {qr_pos['x1']}, {qr_pos['y1']})")
+            draw.rectangle([qr_pos["x0"], qr_pos["y0"], qr_pos["x1"], qr_pos["y1"]], fill="white")
+        
+        log_timing(f"QR code detection on page {page_number}", qr_start_time)
+        
+        # Convert the processed image back to PDF
+        img_buffer = BytesIO()
+        img.save(img_buffer, format="PNG")
+        img_buffer.seek(0)
+        
+        # Clear the existing page content and insert the processed image
+        page.clean_contents()  # Remove existing content
+        page.insert_image(fitz.Rect(0, 0, page.rect.width, page.rect.height), stream=img_buffer.getvalue())
+    
+    # Save the processed PDF
+    doc.save(output_buffer, deflate=True, clean=True)
+    doc.close()
+    
     return output_buffer.getvalue()
 
 def upload_to_s3(pdf_bytes, original_url, bucket_name):
@@ -326,7 +301,6 @@ def get_from_s3(original_url, bucket_name):
     except Exception as e:
         print(f"Unexpected error checking S3: {str(e)}")
         raise
-    
 
 ### KEEP THIS FUNCTION  ###
 def api_response(status_code, body):
@@ -341,10 +315,9 @@ def api_response(status_code, body):
         'body': json.dumps(body)
     }
 
-
 def lambda_handler(event, context):
     """
-    AWS Lambda handler function.
+    AWS Lambda handler function with PyMuPDF-based text detection.
     Expected event format:
     {
         "pdf_url": "https://example.com/document.pdf",
@@ -391,10 +364,11 @@ def lambda_handler(event, context):
             # Download PDF from URL
             pdf_bytes = download_pdf_from_url(pdf_url)
             log_timing("PDF download", download_start)
-            # Process PDF
+            
+            # Process PDF with PyMuPDF
             process_start = time.time()
-            print("Processing PDF...")
-            processed_pdf = mask_text_in_pdf(pdf_bytes, text_to_detect)
+            print("Processing PDF with PyMuPDF...")
+            processed_pdf = mask_text_in_pdf_pymupdf(pdf_bytes, text_to_detect)
             log_timing("PDF processing", process_start)
             
             # Upload to S3

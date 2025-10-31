@@ -1,0 +1,12 @@
+https://s3.amazonaws.com/illuminex-media/uploads/diamond/igi_cert/581334780.pdf
+https://s3.amazonaws.com/illuminex-media/uploads/diamond/igi_cert/647425823.pdf
+https://s3.amazonaws.com/illuminex-media/uploads/diamond/igi_cert/634421388.pdf
+https://dtol-cert-images.s3.amazonaws.com/IGI_pdf/649405307.pdf
+https://s3.amazonaws.com/illuminex-media/uploads/diamond/igi_cert/LG571320946.pdf
+https://s3.amazonaws.com/illuminex-media/uploads/diamond/igi_cert/LG581345287.pdf
+https://s3.amazonaws.com/illuminex-media/uploads/diamond/igi_cert/LG520206548.pdf
+https://s3.amazonaws.com/illuminex-media/uploads/diamond/igi_cert/635497429.pdf
+
+
+outputs:
+https://masked-certificates-bucket.s3.amazonaws.com/masked_certificates/986d90c0f061c96d0c4b345f7ec6546b.pdf?AWSAccessKeyId=***REMOVED-AWS-ACCESS-KEY-ID***&Signature=7PuHA36pXWoznEs%2F39Dt0VGMMcw%3D&Expires=1756190842

@@ -19,36 +19,9 @@ import fitz  # PyMuPDF for better vertical text detection
 # Initialize S3 client outside the handler for better performance
 s3_client = boto3.client('s3')
 
-# Get bucket name from environment variable
-BUCKET_NAME = os.environ.get('AWS_S3_BUCKET', 'masked-certificates-bucket')
-
 # Vertical text detection parameters
 ANGLE_TOLERANCE_DEG = 12        # how close to 90° we consider "vertical"
 PADDING = 1.5                   # extra points to grow the redaction box
-
-def log_timing(operation, start_time):
-    """Log timing for operations"""
-    end_time = time.time()
-    duration = end_time - start_time
-    print(f"[{datetime.now()}] {operation}: {duration:.2f} seconds")
-
-def download_pdf_from_url(url):
-    """Download PDF from URL and return bytes"""
-    response = requests.get(url)
-    if response.status_code != 200:
-        raise Exception(f"Failed to download PDF from URL. Status code: {response.status_code}")
-    return BytesIO(response.content)
-
-def mask_qr_code_and_barcode(img, positions):
-    """Detect and mask QR codes and barcodes."""
-    img = img.convert("L")  # Convert to grayscale for better detection
-    decoded_objects = decode(img)
-    
-    for obj in decoded_objects:
-        x, y, w, h = obj.rect.left, obj.rect.top, obj.rect.width, obj.rect.height
-        positions.append({"x0": x, "y0": y, "x1": x + w, "y1": y + h})
-    
-    return positions
 
 def is_vertical(dir_vec):
     """Check if text direction vector indicates vertical text."""
@@ -117,6 +90,30 @@ def detect_vertical_text_with_pymupdf(pdf_bytes, target_text):
     
     doc.close()
     return vertical_positions
+
+def log_timing(operation, start_time):
+    """Log timing for operations"""
+    end_time = time.time()
+    duration = end_time - start_time
+    print(f"[{datetime.now()}] {operation}: {duration:.2f} seconds")
+
+def download_pdf_from_url(url):
+    """Download PDF from URL and return bytes"""
+    response = requests.get(url)
+    if response.status_code != 200:
+        raise Exception(f"Failed to download PDF from URL. Status code: {response.status_code}")
+    return BytesIO(response.content)
+
+def mask_qr_code_and_barcode(img, positions):
+    """Detect and mask QR codes and barcodes."""
+    img = img.convert("L")  # Convert to grayscale for better detection
+    decoded_objects = decode(img)
+    
+    for obj in decoded_objects:
+        x, y, w, h = obj.rect.left, obj.rect.top, obj.rect.width, obj.rect.height
+        positions.append({"x0": x, "y0": y, "x1": x + w, "y1": y + h})
+    
+    return positions
 
 def clean_text(text):
     """Clean extracted text by removing unwanted characters."""
@@ -190,7 +187,7 @@ def mask_text_in_pdf(pdf_bytes, target_text, dpi=300):
             x_scale = img_width / pdf_width
             y_scale = img_height / pdf_height
 
-            # Always detect vertical text regardless of OCR requirement
+            # Initialize positions list
             scaled_positions = []
             
             # Handle horizontal text detection
@@ -231,6 +228,8 @@ def mask_text_in_pdf(pdf_bytes, target_text, dpi=300):
                         "is_pymupdf": True
                     }
                     scaled_positions.append(scaled_pos)
+            
+            print(f"Page {page_number} scaled_positions ====> ", scaled_positions)
 
             # Apply masking for detected text
             for box in scaled_positions:
@@ -282,16 +281,7 @@ def upload_to_s3(pdf_bytes, original_url, bucket_name):
         
         return s3_key
     except ClientError as e:
-        error_code = e.response['Error']['Code']
-        if error_code == '403':
-            print(f"Permission denied uploading to S3 bucket: {bucket_name}")
-            print("Please check IAM role permissions for the Lambda function")
-            raise Exception("S3 upload denied. Check IAM permissions.")
-        else:
-            print(f"Error uploading to S3: {str(e)}")
-            raise
-    except Exception as e:
-        print(f"Unexpected error uploading to S3: {str(e)}")
+        print(f"Error uploading to S3: {e}")
         raise
 
 def get_from_s3(original_url, bucket_name):
@@ -312,115 +302,70 @@ def get_from_s3(original_url, bucket_name):
             )
             return s3_url
         except ClientError as e:
-            error_code = e.response['Error']['Code']
-            if error_code == '404':
-                print(f"Object not found in S3: {s3_key}")
+            if e.response['Error']['Code'] == '404':
                 return None
-            elif error_code == '403':
-                print(f"Permission denied accessing S3 bucket: {bucket_name}")
-                print("Please check IAM role permissions for the Lambda function")
-                raise Exception("S3 access denied. Check IAM permissions.")
-            else:
-                print(f"Error accessing S3: {str(e)}")
-                raise
-    except Exception as e:
-        print(f"Unexpected error checking S3: {str(e)}")
+            raise
+    except ClientError as e:
+        print(f"Error checking S3: {e}")
         raise
+
+def main():
+    """Run the function locally with static inputs."""
+    total_start_time = time.time()
     
+    # Example inputs
+    pdf_url = "https://s3.amazonaws.com/illuminex-media/uploads/diamond/igi_cert/635497429.pdf"
+    text_to_detect = "635497429"
+    bucket_name = "masked-certificates-bucket"
 
-### KEEP THIS FUNCTION  ###
-def api_response(status_code, body):
-    return {
-        'statusCode': status_code,
-        'headers': {
-            'Content-Type': 'application/json',
-            "Access-Control-Allow-Origin": "*",
-            "Access-Control-Allow-Methods": "OPTIONS,POST",
-            "Access-Control-Allow-Headers": "Content-Type,Authorization"
-        },
-        'body': json.dumps(body)
-    }
+    try:
+        # Check S3 cache first
+        s3_check_start = time.time()
+        print("Checking for existing masked version in S3...")
+        existing_s3_url = get_from_s3(pdf_url, bucket_name)
+        log_timing("S3 cache check", s3_check_start)
+        
+        # if existing_s3_url:
+        #     print(f"Found existing masked version in S3: {existing_s3_url}")
+        #     log_timing("Total operation (cache hit)", total_start_time)
+        #     return existing_s3_url
 
+        # Download PDF
+        download_start = time.time()
+        print("Downloading PDF...")
+        pdf_bytes = download_pdf_from_url(pdf_url)
+        log_timing("PDF download", download_start)
 
-def lambda_handler(event, context):
-    """
-    AWS Lambda handler function.
-    Expected event format:
-    {
-        "pdf_url": "https://example.com/document.pdf",
-        "text_to_detect": "text to blur"
-    }
-    """
-    print('======> event', event)
+        # Process PDF
+        process_start = time.time()
+        print("Processing PDF...")
+        processed_pdf = mask_text_in_pdf(pdf_bytes, text_to_detect)
+        log_timing("PDF processing", process_start)
 
-    http_method = event.get('requestContext', {}).get('http', {}).get('method', '')
-    print('=====> http method ::::', http_method)
+        # Upload to S3
+        upload_start = time.time()
+        print("Uploading to S3...")
+        s3_key = upload_to_s3(processed_pdf, pdf_url, bucket_name)
+        log_timing("S3 upload", upload_start)
 
-    # Check HTTP method
-    if http_method == 'OPTIONS':
-        # Return CORS headers for preflight request
-        return api_response(200, {})
-    
-    if http_method == "POST":
-        try:
-            total_start_time = time.time()
-            
-            body = json.loads(event.get('body', '{}'))
-            
-            # Access pdf_url and text_to_detect
-            pdf_url = body.get('pdf_url')
-            text_to_detect = body.get('text_to_detect')
-            
-            # Check S3 cache first
-            s3_check_start = time.time()
-            print("Checking for existing masked version in S3...")
-            existing_s3_url = get_from_s3(pdf_url, BUCKET_NAME)
-            log_timing("S3 cache check", s3_check_start)
-            
-            if existing_s3_url:
-                print(f"Found existing masked version in S3: {existing_s3_url}")
-                log_timing("Total operation (cache hit)", total_start_time)
-                return api_response(200, {
-                    's3_url': existing_s3_url
-                })
+        # Generate presigned URL
+        url_start = time.time()
+        s3_url = s3_client.generate_presigned_url(
+            'get_object',
+            Params={'Bucket': bucket_name, 'Key': s3_key},
+            ExpiresIn=86400  # 24 hours
+        )
+        log_timing("URL generation", url_start)
 
-            # Download PDF
-            download_start = time.time()
-            print("Downloading PDF...")
-            
-            # Download PDF from URL
-            pdf_bytes = download_pdf_from_url(pdf_url)
-            log_timing("PDF download", download_start)
-            # Process PDF
-            process_start = time.time()
-            print("Processing PDF...")
-            processed_pdf = mask_text_in_pdf(pdf_bytes, text_to_detect)
-            log_timing("PDF processing", process_start)
-            
-            # Upload to S3
-            upload_start = time.time()
-            print("Uploading to S3...")
-            s3_key = upload_to_s3(processed_pdf, pdf_url, BUCKET_NAME)
-            log_timing("S3 upload", upload_start)
+        print(f"Uploaded to S3. Access URL: {s3_url}")
+        log_timing("Total operation (cache miss)", total_start_time)
+        return s3_url
 
-            # Generate presigned URL
-            url_start = time.time()
-            s3_url = s3_client.generate_presigned_url(
-                'get_object',
-                Params={'Bucket': BUCKET_NAME, 'Key': s3_key},
-                ExpiresIn=86400  # 24 hours
-            )
-            log_timing("URL generation", url_start)
+    except Exception as e:
+        print(f"An error occurred: {e}")
+        log_timing("Failed operation", total_start_time)
+        raise
 
-            print(f"Uploaded to S3. Access URL: {s3_url}")
-            log_timing("Total operation (cache miss)", total_start_time)
-            
-            return api_response(200, {
-                's3_url': s3_url
-            })
-            
-        except Exception as e:
-            import traceback; traceback.print_exc();
-            return api_response(500, {
-                'error': str(e)
-            })
+# Run locally
+if __name__ == "__main__":
+    main()
