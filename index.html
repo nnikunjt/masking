@@ -125,8 +125,15 @@
           throw new Error(errorMessage);
         }
         
-        if (result.body) {
-          // Parse the body (it might be a string or already an object)
+        // Handle both direct response format and Lambda-wrapped format
+        let s3Url = null;
+        
+        // Check for direct format: {"s3_url": "..."}
+        if (result.s3_url) {
+          s3Url = result.s3_url;
+        } 
+        // Check for Lambda-wrapped format: {"body": "{\"s3_url\": \"...\"}"} or {"body": {"s3_url": "..."}}
+        else if (result.body) {
           let decodedBody;
           if (typeof result.body === 'string') {
             try {
@@ -140,24 +147,26 @@
           }
           
           if (decodedBody.s3_url) {
-            const s3Url = decodedBody.s3_url;
-
-            // Display S3 link
-            s3Link.href = s3Url;
-            s3Link.textContent = s3Url;
-            
-            // Set up download link
-            downloadLink.href = s3Url;
-            
-            // Show result container
-            resultContainer.style.display = 'block';
+            s3Url = decodedBody.s3_url;
           } else if (decodedBody.error) {
             throw new Error(decodedBody.error);
           } else {
             throw new Error('Response missing s3_url');
           }
         } else {
-          throw new Error('No response body received from server');
+          throw new Error('No s3_url found in response');
+        }
+        
+        if (s3Url) {
+          // Display S3 link
+          s3Link.href = s3Url;
+          s3Link.textContent = s3Url;
+          
+          // Set up download link
+          downloadLink.href = s3Url;
+          
+          // Show result container
+          resultContainer.style.display = 'block';
         }
       } catch (error) {
         console.error('Error:', error);
