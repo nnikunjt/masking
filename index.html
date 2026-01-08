@@ -103,25 +103,69 @@
         });
 
         const result = await response.json();
+        console.log('API Response:', result);
+        console.log('Response Status:', response.status);
+        console.log('Response OK:', response.ok);
         
-        if (response.ok && result.body) {
-          const decodedBody = JSON.parse(result.body);
-          const s3Url = decodedBody.s3_url;
+        if (!response.ok) {
+          // Handle HTTP error responses
+          let errorMessage = 'Failed to process file';
+          if (result.body) {
+            try {
+              const errorBody = typeof result.body === 'string' ? JSON.parse(result.body) : result.body;
+              errorMessage = errorBody.error || errorBody.message || errorMessage;
+            } catch (e) {
+              errorMessage = result.body || errorMessage;
+            }
+          } else if (result.message) {
+            errorMessage = result.message;
+          } else if (result.error) {
+            errorMessage = result.error;
+          }
+          throw new Error(errorMessage);
+        }
+        
+        if (result.body) {
+          // Parse the body (it might be a string or already an object)
+          let decodedBody;
+          if (typeof result.body === 'string') {
+            try {
+              decodedBody = JSON.parse(result.body);
+            } catch (e) {
+              console.error('Failed to parse result.body:', e);
+              throw new Error('Invalid response format from server');
+            }
+          } else {
+            decodedBody = result.body;
+          }
+          
+          if (decodedBody.s3_url) {
+            const s3Url = decodedBody.s3_url;
 
-          // Display S3 link
-          s3Link.href = s3Url;
-          s3Link.textContent = s3Url;
-          
-          // Set up download link
-          downloadLink.href = s3Url;
-          
-          // Show result container
-          resultContainer.style.display = 'block';
+            // Display S3 link
+            s3Link.href = s3Url;
+            s3Link.textContent = s3Url;
+            
+            // Set up download link
+            downloadLink.href = s3Url;
+            
+            // Show result container
+            resultContainer.style.display = 'block';
+          } else if (decodedBody.error) {
+            throw new Error(decodedBody.error);
+          } else {
+            throw new Error('Response missing s3_url');
+          }
         } else {
-          throw new Error(result.message || 'Failed to process file');
+          throw new Error('No response body received from server');
         }
       } catch (error) {
         console.error('Error:', error);
+        console.error('Error details:', {
+          message: error.message,
+          stack: error.stack,
+          name: error.name
+        });
         errorDiv.textContent = error.message || 'An error occurred while processing the file.';
         errorDiv.style.display = 'block';
       } finally {
