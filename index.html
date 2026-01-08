@@ -103,71 +103,25 @@
         });
 
         const result = await response.json();
-        console.log('API Response:', result);
-        console.log('Response Status:', response.status);
-        console.log('Response OK:', response.ok);
         
         if (!response.ok) {
-          // Handle HTTP error responses
-          let errorMessage = 'Failed to process file';
-          if (result.body) {
-            try {
-              const errorBody = typeof result.body === 'string' ? JSON.parse(result.body) : result.body;
-              errorMessage = errorBody.error || errorBody.message || errorMessage;
-            } catch (e) {
-              errorMessage = result.body || errorMessage;
-            }
-          } else if (result.message) {
-            errorMessage = result.message;
-          } else if (result.error) {
-            errorMessage = result.error;
-          }
+          const errorMessage = result.error || result.message || 'Failed to process file';
           throw new Error(errorMessage);
         }
         
-        // Handle both direct response format and Lambda-wrapped format
-        let s3Url = null;
-        
-        // Check for direct format: {"s3_url": "..."}
-        if (result.s3_url) {
-          s3Url = result.s3_url;
-        } 
-        // Check for Lambda-wrapped format: {"body": "{\"s3_url\": \"...\"}"} or {"body": {"s3_url": "..."}}
-        else if (result.body) {
-          let decodedBody;
-          if (typeof result.body === 'string') {
-            try {
-              decodedBody = JSON.parse(result.body);
-            } catch (e) {
-              console.error('Failed to parse result.body:', e);
-              throw new Error('Invalid response format from server');
-            }
-          } else {
-            decodedBody = result.body;
-          }
-          
-          if (decodedBody.s3_url) {
-            s3Url = decodedBody.s3_url;
-          } else if (decodedBody.error) {
-            throw new Error(decodedBody.error);
-          } else {
-            throw new Error('Response missing s3_url');
-          }
-        } else {
+        if (!result.s3_url) {
           throw new Error('No s3_url found in response');
         }
         
-        if (s3Url) {
-          // Display S3 link
-          s3Link.href = s3Url;
-          s3Link.textContent = s3Url;
-          
-          // Set up download link
-          downloadLink.href = s3Url;
-          
-          // Show result container
-          resultContainer.style.display = 'block';
-        }
+        // Display S3 link
+        s3Link.href = result.s3_url;
+        s3Link.textContent = result.s3_url;
+        
+        // Set up download link
+        downloadLink.href = result.s3_url;
+        
+        // Show result container
+        resultContainer.style.display = 'block';
       } catch (error) {
         console.error('Error:', error);
         console.error('Error details:', {
