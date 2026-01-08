@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>PDF Masking</title>
+  <title>File Masking - PDF & Image Support</title>
   <style>
     body {
       font-family: Arial, sans-serif;
@@ -16,6 +16,19 @@
       width: 100%;
       height: 500px;
       border: 1px solid #ccc;
+    }
+    #previewContainer {
+      width: 100%;
+      height: 500px;
+      border: 1px solid #ccc;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background-color: #f5f5f5;
+    }
+    #imagePreview {
+      max-width: 100%;
+      max-height: 100%;
     }
     .loading {
       display: none;
@@ -34,11 +47,11 @@
   </style>
 </head>
 <body>
-  <h1>VDB PDF Masking</h1>
+  <h1>File Masking</h1>
   <form id="pdfForm">
-    <label for="pdf_url">PDF URL:</label><br>
-    <input type="url" id="pdf_url" name="pdf_url" placeholder="Enter PDF URL" required style="width: 100%;"><br>
-    <span style="color: red;">* only upload pdf url</span>
+    <label for="pdf_url">File URL (PDF or Image):</label><br>
+    <input type="url" id="pdf_url" name="pdf_url" placeholder="Enter PDF or Image URL (supports .pdf, .jpg, .jpeg, .png)" required style="width: 100%;"><br>
+    <span style="color: #666; font-size: 0.9em;">* Supports PDF files (.pdf) and Image files (.jpg, .jpeg, .png)</span>
     <br>
     <br>
     <label for="text_to_detect">Text to Detect:</label><br>
@@ -47,14 +60,17 @@
     <button type="submit">Submit</button>
   </form>
   
-  <div id="loading" class="loading">Processing PDF, please wait...</div>
+  <div id="loading" class="loading">Processing file, please wait...</div>
   <div id="error" class="error"></div>
-  <a id="downloadLink" class="download-link" href="#" download>Download PDF</a>
+  <a id="downloadLink" class="download-link" href="#" download>Download Processed File</a>
   
-  <h2>Masked PDF Preview</h2>
-  <object id="pdfPreview" class="pdf-container" data="" type="application/pdf">
-    <p>Unable to display PDF. <a id="directLink" href="#">Click here to view directly</a></p>
-  </object>
+  <h2>Masked File Preview</h2>
+  <div id="previewContainer">
+    <object id="pdfPreview" class="pdf-container" data="" type="application/pdf" style="display: none;">
+      <p>Unable to display PDF. <a id="directLink" href="#">Click here to view directly</a></p>
+    </object>
+    <img id="imagePreview" class="pdf-container" src="" alt="Processed image preview" style="display: none; object-fit: contain;">
+  </div>
   
   <script>
     document.getElementById('pdfForm').addEventListener('submit', async (e) => {
@@ -64,6 +80,7 @@
       const textToDetect = document.getElementById('text_to_detect').value;
       const loadingDiv = document.getElementById('loading');
       const pdfPreview = document.getElementById('pdfPreview');
+      const imagePreview = document.getElementById('imagePreview');
       const errorDiv = document.getElementById('error');
       const downloadLink = document.getElementById('downloadLink');
       const directLink = document.getElementById('directLink');
@@ -71,9 +88,15 @@
       // Reset UI
       loadingDiv.style.display = 'block';
       pdfPreview.style.display = 'none';
+      imagePreview.style.display = 'none';
       errorDiv.style.display = 'none';
       errorDiv.textContent = '';
       downloadLink.style.display = 'none';
+      
+      // Detect file type from URL
+      const urlLower = pdfUrl.toLowerCase();
+      const isImage = urlLower.match(/\.(jpg|jpeg|png)$/);
+      const isPdf = urlLower.match(/\.pdf$/);
       
       const requestData = {
         pdf_url: pdfUrl,
@@ -95,9 +118,21 @@
           const decodedBody = JSON.parse(result.body);
           const s3Url = decodedBody.s3_url;
 
-          // Set the PDF URL
-          pdfPreview.data = s3Url;
-          pdfPreview.style.display = 'block';
+          // Determine if output is PDF or image based on URL
+          const outputUrlLower = s3Url.toLowerCase();
+          const isOutputImage = outputUrlLower.match(/\.(jpg|jpeg|png)$/);
+          
+          if (isOutputImage) {
+            // Display as image
+            imagePreview.src = s3Url;
+            imagePreview.style.display = 'block';
+            pdfPreview.style.display = 'none';
+          } else {
+            // Display as PDF
+            pdfPreview.data = s3Url;
+            pdfPreview.style.display = 'block';
+            imagePreview.style.display = 'none';
+          }
           
           // Set up download link
           downloadLink.href = s3Url;
@@ -106,17 +141,23 @@
           // Set up direct link
           directLink.href = s3Url;
           
-          // Add error handling
+          // Add error handling for PDF
           pdfPreview.onerror = () => {
             errorDiv.textContent = 'Failed to load PDF preview. Please use the download link instead.';
             errorDiv.style.display = 'block';
           };
+          
+          // Add error handling for image
+          imagePreview.onerror = () => {
+            errorDiv.textContent = 'Failed to load image preview. Please use the download link instead.';
+            errorDiv.style.display = 'block';
+          };
         } else {
-          throw new Error(result.message || 'Failed to process PDF');
+          throw new Error(result.message || 'Failed to process file');
         }
       } catch (error) {
         console.error('Error:', error);
-        errorDiv.textContent = error.message || 'An error occurred while processing the PDF.';
+        errorDiv.textContent = error.message || 'An error occurred while processing the file.';
         errorDiv.style.display = 'block';
       } finally {
         loadingDiv.style.display = 'none';
