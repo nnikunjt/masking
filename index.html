@@ -67,15 +67,15 @@
     <p><strong>S3 Link:</strong></p>
     <a id="s3Link" href="#" target="_blank" style="word-break: break-all; color: #0066cc; text-decoration: underline;">Loading...</a>
     <br><br>
-    <a id="downloadLink" href="#" download style="display: inline-block; padding: 8px 16px; background-color: #0066cc; color: white; text-decoration: none; border-radius: 4px; margin-top: 10px;">Download Processed File</a>
+   
   </div>
   
   <script>
     document.getElementById('pdfForm').addEventListener('submit', async (e) => {
       e.preventDefault();
       
-      const pdfUrl = document.getElementById('pdf_url').value;
-      const textToDetect = document.getElementById('text_to_detect').value;
+      const pdfUrl = document.getElementById('pdf_url').value.trim();
+      const textToDetect = document.getElementById('text_to_detect').value.trim();
       const loadingDiv = document.getElementById('loading');
       const errorDiv = document.getElementById('error');
       const resultContainer = document.getElementById('resultContainer');
