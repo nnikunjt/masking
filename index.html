@@ -89,7 +89,6 @@
       const errorDiv = document.getElementById('error');
       const resultContainer = document.getElementById('resultContainer');
       const s3Link = document.getElementById('s3Link');
-      const downloadLink = document.getElementById('downloadLink');
       
       // Reset UI
       loadingDiv.style.display = 'block';
@@ -126,9 +125,6 @@
         // Display S3 link
         s3Link.href = result.s3_url;
         s3Link.textContent = result.s3_url;
-        
-        // Set up download link
-        downloadLink.href = result.s3_url;
         
         // Show result container
         resultContainer.style.display = 'block';
