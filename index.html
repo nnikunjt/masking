@@ -55,7 +55,13 @@
     <br>
     <label for="text_to_detect">Text to Detect:</label><br>
     <input type="text" id="text_to_detect" name="text_to_detect" placeholder="Enter text to detect" required style="width: 100%;"><br><br>
-    
+    <label>
+      <input type="checkbox" id="skip_cache" name="skip_cache">
+      Skip cache (force fresh processing)
+    </label>
+    <br>
+    <span style="color: #666; font-size: 0.9em;">* When checked, will bypass S3 cache and reprocess the file</span>
+    <br><br>
     <button type="submit">Submit</button>
   </form>
   
