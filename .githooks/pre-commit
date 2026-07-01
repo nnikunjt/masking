@@ -1,0 +1,16 @@
+#!/bin/sh
+# Block commits that contain secrets (AWS keys, tokens, etc.), scanning staged changes only.
+# Enabled via: git config core.hooksPath .githooks
+if command -v gitleaks >/dev/null 2>&1; then
+  gitleaks protect --staged --redact --no-banner
+  status=$?
+  if [ $status -ne 0 ]; then
+    echo ""
+    echo "gitleaks: potential secret detected in staged changes. Commit blocked." >&2
+    echo "If this is a false positive, fix the finding or add an exception to .gitleaks.toml." >&2
+    exit 1
+  fi
+else
+  echo "gitleaks not found locally — install with 'brew install gitleaks' to enable secret scanning on commit." >&2
+fi
+exit 0

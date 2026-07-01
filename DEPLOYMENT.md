@@ -19,6 +19,13 @@ Account: `025066257788`.
 - Docker with `linux/amd64` build support (buildx/emulation on Apple Silicon)
 - AWS CLI v2 configured with credentials for account `025066257788` with `ecr:*` and `lambda:UpdateFunctionCode` permissions
 - Repo cloned locally
+- `gitleaks` installed (`brew install gitleaks`) and hooks enabled once per clone:
+
+  ```bash
+  git config core.hooksPath .githooks
+  ```
+
+  This blocks commits containing AWS keys/tokens before they reach git history. AWS credentials belong in `lambda/.env` (gitignored) or the Lambda execution role/environment — never hardcoded in source.
 
 ## A. Backend (Lambda) deployment
 
