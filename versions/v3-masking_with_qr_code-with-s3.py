@@ -251,8 +251,8 @@ def main():
 # Run the script locally
 if __name__ == "__main__":
     configure_aws_credentials(
-        aws_access_key_id='***REMOVED-AWS-ACCESS-KEY-ID***',
-        aws_secret_access_key='***REMOVED-AWS-SECRET-ACCESS-KEY***',
-        region_name='us-east-1'
+        aws_access_key_id=os.environ.get('AWS_ACCESS_KEY_ID'),
+        aws_secret_access_key=os.environ.get('AWS_SECRET_ACCESS_KEY'),
+        region_name=os.environ.get('AWS_DEFAULT_REGION', 'us-east-1')
     )
     main()
