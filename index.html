@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>PDF Masking</title>
+  <title>File Masking - PDF & Image Support</title>
   <style>
     body {
       font-family: Arial, sans-serif;
@@ -31,57 +31,79 @@
       display: none;
       margin: 10px 0;
     }
+    #resultContainer {
+      margin: 20px 0;
+      padding: 15px;
+      border: 1px solid #ccc;
+      border-radius: 4px;
+      background-color: #f9f9f9;
+    }
+    #s3Link {
+      display: inline-block;
+      max-width: 100%;
+      word-break: break-all;
+    }
   </style>
 </head>
 <body>
-  <h1>PDF Masking</h1>
+  <h1>File Masking</h1>
   <form id="pdfForm">
-    <label for="pdf_url">PDF URL:</label><br>
-    <input type="url" id="pdf_url" name="pdf_url" placeholder="Enter PDF URL" required style="width: 100%;"><br>
-    <span style="color: red;">* only upload pdf url</span>
+    <label for="pdf_url">File URL (PDF or Image):</label><br>
+    <input type="url" id="pdf_url" name="pdf_url" placeholder="Enter PDF or Image URL (supports .pdf, .jpg, .jpeg, .png)" required style="width: 100%;"><br>
+    <span style="color: #666; font-size: 0.9em;">* Supports PDF files (.pdf) and Image files (.jpg, .jpeg, .png)</span>
     <br>
     <br>
     <label for="text_to_detect">Text to Detect:</label><br>
     <input type="text" id="text_to_detect" name="text_to_detect" placeholder="Enter text to detect" required style="width: 100%;"><br><br>
     
+    <label>
+      <input type="checkbox" id="skip_cache" name="skip_cache">
+      Skip cache (force fresh processing)
+    </label>
+    <br>
+    <span style="color: #666; font-size: 0.9em;">* When checked, will bypass S3 cache and reprocess the file</span>
+    <br><br>
+    
     <button type="submit">Submit</button>
   </form>
   
-  <div id="loading" class="loading">Processing PDF, please wait...</div>
+  <div id="loading" class="loading">Processing file, please wait...</div>
   <div id="error" class="error"></div>
-  <a id="downloadLink" class="download-link" href="#" download>Download PDF</a>
   
-  <h2>Masked PDF Preview</h2>
-  <object id="pdfPreview" class="pdf-container" data="" type="application/pdf">
-    <p>Unable to display PDF. <a id="directLink" href="#">Click here to view directly</a></p>
-  </object>
+  <h2>Processed File</h2>
+  <div id="resultContainer" style="display: none;">
+    <p><strong>S3 Link:</strong></p>
+    <a id="s3Link" href="#" target="_blank" style="word-break: break-all; color: #0066cc; text-decoration: underline;">Loading...</a>
+    <br><br>
+   
+  </div>
   
   <script>
     document.getElementById('pdfForm').addEventListener('submit', async (e) => {
       e.preventDefault();
       
-      const pdfUrl = document.getElementById('pdf_url').value;
-      const textToDetect = document.getElementById('text_to_detect').value;
+      const pdfUrl = document.getElementById('pdf_url').value.trim();
+      const textToDetect = document.getElementById('text_to_detect').value.trim();
+      const skipCache = document.getElementById('skip_cache').checked;
       const loadingDiv = document.getElementById('loading');
-      const pdfPreview = document.getElementById('pdfPreview');
       const errorDiv = document.getElementById('error');
-      const downloadLink = document.getElementById('downloadLink');
-      const directLink = document.getElementById('directLink');
+      const resultContainer = document.getElementById('resultContainer');
+      const s3Link = document.getElementById('s3Link');
       
       // Reset UI
       loadingDiv.style.display = 'block';
-      pdfPreview.style.display = 'none';
+      resultContainer.style.display = 'none';
       errorDiv.style.display = 'none';
       errorDiv.textContent = '';
-      downloadLink.style.display = 'none';
       
       const requestData = {
         pdf_url: pdfUrl,
-        text_to_detect: textToDetect
+        text_to_detect: textToDetect,
+        skip_cache: skipCache
       };
 
       try {
-        const response = await fetch('https://wp59s0wcwd.execute-api.ap-south-1.amazonaws.com/default/VDB-Masking-Dev', {
+        const response = await fetch('https://iqdfxko6jk.execute-api.us-east-1.amazonaws.com/default/VDB-masking-feature', {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
@@ -91,32 +113,29 @@
 
         const result = await response.json();
         
-        if (response.ok && result.body) {
-          const decodedBody = JSON.parse(result.body);
-          const s3Url = decodedBody.s3_url;
-
-          // Set the PDF URL
-          pdfPreview.data = s3Url;
-          pdfPreview.style.display = 'block';
-          
-          // Set up download link
-          downloadLink.href = s3Url;
-          downloadLink.style.display = 'inline-block';
-          
-          // Set up direct link
-          directLink.href = s3Url;
-          
-          // Add error handling
-          pdfPreview.onerror = () => {
-            errorDiv.textContent = 'Failed to load PDF preview. Please use the download link instead.';
-            errorDiv.style.display = 'block';
-          };
-        } else {
-          throw new Error(result.message || 'Failed to process PDF');
+        if (!response.ok) {
+          const errorMessage = result.error || result.message || 'Failed to process file';
+          throw new Error(errorMessage);
         }
+        
+        if (!result.s3_url) {
+          throw new Error('No s3_url found in response');
+        }
+        
+        // Display S3 link
+        s3Link.href = result.s3_url;
+        s3Link.textContent = result.s3_url;
+        
+        // Show result container
+        resultContainer.style.display = 'block';
       } catch (error) {
         console.error('Error:', error);
-        errorDiv.textContent = error.message || 'An error occurred while processing the PDF.';
+        console.error('Error details:', {
+          message: error.message,
+          stack: error.stack,
+          name: error.name
+        });
+        errorDiv.textContent = error.message || 'An error occurred while processing the file.';
         errorDiv.style.display = 'block';
       } finally {
         loadingDiv.style.display = 'none';

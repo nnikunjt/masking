@@ -40,13 +40,144 @@ def download_pdf_from_url(url):
     return BytesIO(response.content)
 
 def mask_qr_code_and_barcode(img, positions):
-    """Detect and mask QR codes and barcodes."""
-    img = img.convert("L")  # Convert to grayscale for better detection
-    decoded_objects = decode(img)
+    """
+    Detect and mask QR codes and barcodes with improved detection.
+    Tries multiple preprocessing techniques to improve detection accuracy.
+    """
+    detected_codes = []
     
+    # Method 1: Try with grayscale (original implementation)
+    img_gray = img.convert("L")
+    decoded_objects = decode(img_gray)
     for obj in decoded_objects:
         x, y, w, h = obj.rect.left, obj.rect.top, obj.rect.width, obj.rect.height
-        positions.append({"x0": x, "y0": y, "x1": x + w, "y1": y + h})
+        detected_codes.append({"x0": x, "y0": y, "x1": x + w, "y1": y + h, "method": "grayscale"})
+    
+    # If nothing found, try with color image (pyzbar sometimes works better with color)
+    if not detected_codes:
+        decoded_objects = decode(img)
+        for obj in decoded_objects:
+            x, y, w, h = obj.rect.left, obj.rect.top, obj.rect.width, obj.rect.height
+            detected_codes.append({"x0": x, "y0": y, "x1": x + w, "y1": y + h, "method": "color"})
+    
+    # Method 2: Try with contrast enhancement
+    if not detected_codes:
+        try:
+            from PIL import ImageEnhance
+            enhancer = ImageEnhance.Contrast(img)
+            img_contrast = enhancer.enhance(2.0)
+            decoded_objects = decode(img_contrast)
+            for obj in decoded_objects:
+                x, y, w, h = obj.rect.left, obj.rect.top, obj.rect.width, obj.rect.height
+                detected_codes.append({"x0": x, "y0": y, "x1": x + w, "y1": y + h, "method": "contrast"})
+        except Exception as e:
+            print(f"    Contrast enhancement failed: {e}")
+    
+    # Method 3: Try with brightness adjustment
+    if not detected_codes:
+        try:
+            from PIL import ImageEnhance
+            enhancer = ImageEnhance.Brightness(img)
+            img_bright = enhancer.enhance(1.5)
+            decoded_objects = decode(img_bright)
+            for obj in decoded_objects:
+                x, y, w, h = obj.rect.left, obj.rect.top, obj.rect.width, obj.rect.height
+                detected_codes.append({"x0": x, "y0": y, "x1": x + w, "y1": y + h, "method": "brightness"})
+        except Exception as e:
+            print(f"    Brightness adjustment failed: {e}")
+    
+    # Method 4: Try with sharpening
+    if not detected_codes:
+        try:
+            from PIL import ImageEnhance
+            enhancer = ImageEnhance.Sharpness(img)
+            img_sharp = enhancer.enhance(2.0)
+            decoded_objects = decode(img_sharp)
+            for obj in decoded_objects:
+                x, y, w, h = obj.rect.left, obj.rect.top, obj.rect.width, obj.rect.height
+                detected_codes.append({"x0": x, "y0": y, "x1": x + w, "y1": y + h, "method": "sharpness"})
+        except Exception as e:
+            print(f"    Sharpness enhancement failed: {e}")
+    
+    # Method 5: Try with 2x upscaling (helps with small QR codes)
+    if not detected_codes:
+        try:
+            original_width, original_height = img.size
+            img_large = img.resize((original_width * 2, original_height * 2), Image.LANCZOS)
+            decoded_objects = decode(img_large)
+            # Scale coordinates back to original size
+            for obj in decoded_objects:
+                x, y, w, h = obj.rect.left, obj.rect.top, obj.rect.width, obj.rect.height
+                detected_codes.append({
+                    "x0": x // 2,
+                    "y0": y // 2,
+                    "x1": (x + w) // 2,
+                    "y1": (y + h) // 2,
+                    "method": "upscaled"
+                })
+        except Exception as e:
+            print(f"    Upscaling failed: {e}")
+    
+    # Method 6: Try OpenCV QR detector as fallback
+    if not detected_codes:
+        try:
+            import cv2
+            import numpy as np
+            # Convert PIL to OpenCV format
+            img_cv = cv2.cvtColor(np.array(img), cv2.COLOR_RGB2BGR)
+            
+            # Try QRCodeDetector
+            qr_detector = cv2.QRCodeDetector()
+            data, bbox, straight_qrcode = qr_detector.detectAndDecode(img_cv)
+            
+            if bbox is not None:
+                # bbox is a numpy array of shape (1, 4, 2) containing corner points
+                bbox = bbox[0]  # Get first detection
+                x_coords = bbox[:, 0]
+                y_coords = bbox[:, 1]
+                
+                x0 = int(np.min(x_coords))
+                y0 = int(np.min(y_coords))
+                x1 = int(np.max(x_coords))
+                y1 = int(np.max(y_coords))
+                
+                detected_codes.append({
+                    "x0": x0,
+                    "y0": y0,
+                    "x1": x1,
+                    "y1": y1,
+                    "method": "opencv"
+                })
+        except Exception as e:
+            print(f"    OpenCV QR detection failed: {e}")
+    
+    # Method 7: Try with binary thresholding
+    if not detected_codes:
+        try:
+            import cv2
+            import numpy as np
+            img_cv = cv2.cvtColor(np.array(img), cv2.COLOR_RGB2GRAY)
+            # Apply adaptive thresholding
+            img_thresh = cv2.adaptiveThreshold(
+                img_cv, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, 
+                cv2.THRESH_BINARY, 11, 2
+            )
+            # Convert back to PIL for pyzbar
+            img_thresh_pil = Image.fromarray(img_thresh)
+            decoded_objects = decode(img_thresh_pil)
+            for obj in decoded_objects:
+                x, y, w, h = obj.rect.left, obj.rect.top, obj.rect.width, obj.rect.height
+                detected_codes.append({"x0": x, "y0": y, "x1": x + w, "y1": y + h, "method": "threshold"})
+        except Exception as e:
+            print(f"    Threshold detection failed: {e}")
+    
+    # Add all detected codes to positions
+    for code in detected_codes:
+        print(f"    Found QR/barcode using method: {code['method']} at ({code['x0']}, {code['y0']}, {code['x1']}, {code['y1']})")
+        positions.append({"x0": code["x0"], "y0": code["y0"], "x1": code["x1"], "y1": code["y1"]})
+    
+    if not detected_codes:
+        print("    No QR codes or barcodes detected with any method")
     
     return positions
 
@@ -370,19 +501,23 @@ def lambda_handler(event, context):
             # Access pdf_url and text_to_detect
             pdf_url = body.get('pdf_url')
             text_to_detect = body.get('text_to_detect')
+            skip_cache = body.get('skip_cache', False)  # New parameter to skip cache
             
-            # Check S3 cache first
-            s3_check_start = time.time()
-            print("Checking for existing masked version in S3...")
-            existing_s3_url = get_from_s3(pdf_url, BUCKET_NAME)
-            log_timing("S3 cache check", s3_check_start)
-            
-            if existing_s3_url:
-                print(f"Found existing masked version in S3: {existing_s3_url}")
-                log_timing("Total operation (cache hit)", total_start_time)
-                return api_response(200, {
-                    's3_url': existing_s3_url
-                })
+            # Check S3 cache first (unless skip_cache is enabled)
+            if not skip_cache:
+                s3_check_start = time.time()
+                print("Checking for existing masked version in S3...")
+                existing_s3_url = get_from_s3(pdf_url, BUCKET_NAME)
+                log_timing("S3 cache check", s3_check_start)
+                
+                if existing_s3_url:
+                    print(f"Found existing masked version in S3: {existing_s3_url}")
+                    log_timing("Total operation (cache hit)", total_start_time)
+                    return api_response(200, {
+                        's3_url': existing_s3_url
+                    })
+            else:
+                print("Cache skipped: skip_cache parameter is enabled. Processing file fresh...")
 
             # Download PDF
             download_start = time.time()

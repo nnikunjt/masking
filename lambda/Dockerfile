@@ -96,14 +96,14 @@ WORKDIR /var/task
 COPY requirements.txt .
 
 # Install packages in order to avoid conflicts, PyMuPDF last
-RUN pip install --upgrade pip setuptools wheel && \
-    pip install --no-cache-dir boto3>=1.34.0 && \
-    pip install --no-cache-dir requests>=2.31.0 && \
-    pip install --no-cache-dir Pillow>=10.0.0 && \
-    pip install --no-cache-dir pyzbar>=0.1.9 && \
-    pip install --no-cache-dir pdfplumber>=0.10.0 && \
-    pip install --no-cache-dir opencv-python>=4.8.0 && \
-    pip install --no-cache-dir --no-build-isolation PyMuPDF==1.23.8
+RUN pip3.11 install --upgrade pip setuptools wheel && \
+    pip3.11 install --no-cache-dir "numpy>=1.24.0,<2.0" "opencv-python-headless>=4.8.0,<5.0" && \
+    pip3.11 install --no-cache-dir boto3>=1.34.0 && \
+    pip3.11 install --no-cache-dir requests>=2.31.0 && \
+    pip3.11 install --no-cache-dir Pillow>=10.0.0 && \
+    pip3.11 install --no-cache-dir pyzbar>=0.1.9 && \
+    pip3.11 install --no-cache-dir pdfplumber>=0.10.0 && \
+    pip3.11 install --no-cache-dir --no-build-isolation PyMuPDF==1.23.8
 
 # Copy only the function code (reduces rebuild time when only code changes)
 COPY lambda_function_pymupdf.py .
